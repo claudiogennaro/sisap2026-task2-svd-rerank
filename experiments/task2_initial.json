@@ -1,0 +1,40 @@
+{
+  "exact": {
+    "topk": 30,
+    "batch_size": 512
+  },
+  "hnsw_screening": [
+    { "m_hnsw": 16, "ef_construction": 200, "ef_search": 32, "topk": 30, "batch_size": 512 },
+    { "m_hnsw": 32, "ef_construction": 200, "ef_search": 64, "topk": 30, "batch_size": 512 },
+    { "m_hnsw": 32, "ef_construction": 400, "ef_search": 96, "topk": 30, "batch_size": 512 }
+  ],
+  "pca_screening": [
+    { "d": 16, "m": 8, "topk": 30, "batch_size": 512 },
+    { "d": 24, "m": 8, "topk": 30, "batch_size": 512 },
+    { "d": 32, "m": 8, "topk": 30, "batch_size": 512 },
+    { "d": 48, "m": 8, "topk": 30, "batch_size": 512 },
+    { "d": 64, "m": 8, "topk": 30, "batch_size": 512 },
+    { "d": 96, "m": 8, "topk": 30, "batch_size": 512 }
+  ],
+  "svd_screening": [
+    { "d": 16, "m": 8, "topk": 30, "batch_size": 512, "n_iter": 7 },
+    { "d": 24, "m": 8, "topk": 30, "batch_size": 512, "n_iter": 7 },
+    { "d": 32, "m": 8, "topk": 30, "batch_size": 512, "n_iter": 7 },
+    { "d": 48, "m": 8, "topk": 30, "batch_size": 512, "n_iter": 7 },
+    { "d": 64, "m": 8, "topk": 30, "batch_size": 512, "n_iter": 7 },
+    { "d": 96, "m": 8, "topk": 30, "batch_size": 512, "n_iter": 7 }
+  ],
+  "svd_local_refine": [
+    { "d": 78, "m": 8, "topk": 30, "batch_size": 512, "n_iter": 7 },
+    { "d": 80, "m": 7, "topk": 30, "batch_size": 512, "n_iter": 7 },
+    { "d": 76, "m": 10, "topk": 30, "batch_size": 512, "n_iter": 7 }
+  ],
+  "pca_refine": [
+    { "d": 32, "m": 4, "topk": 30, "batch_size": 512 },
+    { "d": 32, "m": 8, "topk": 30, "batch_size": 512 },
+    { "d": 32, "m": 12, "topk": 30, "batch_size": 512 },
+    { "d": 48, "m": 4, "topk": 30, "batch_size": 512 },
+    { "d": 48, "m": 8, "topk": 30, "batch_size": 512 },
+    { "d": 48, "m": 12, "topk": 30, "batch_size": 512 }
+  ]
+}

@@ -1,0 +1,5 @@
+faiss-cpu
+h5py
+numpy
+psutil
+scikit-learn
