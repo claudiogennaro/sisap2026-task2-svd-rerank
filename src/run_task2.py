@@ -11,7 +11,7 @@ def build_parser():
     parser.add_argument("--query-dset", default="test", help="Nome dataset query.")
     parser.add_argument("--output-h5", default="results/task2/svd_d76_m10.h5", help="Path output HDF5.")
     parser.add_argument("--topk", type=int, default=30)
-    parser.add_argument("--batch-size", type=int, default=512)
+    parser.add_argument("--batch-size", type=int, default=1024)
     parser.add_argument("--d", type=int, default=76, help="Dimensione TruncatedSVD.")
     parser.add_argument("--m", type=int, default=10, help="Fattore candidati: candidate_k = topk * m.")
     parser.add_argument("--n-iter", type=int, default=7)

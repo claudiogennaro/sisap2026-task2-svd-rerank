@@ -257,15 +257,16 @@ def run_svd_rerank(args) -> None:
 
     build_start = time.perf_counter()
     svd = TruncatedSVD(n_components=args.d, algorithm="randomized", n_iter=args.n_iter, random_state=args.seed)
-    base_proj = svd.fit_transform(base).astype(np.float32, copy=False)
+    proj_dtype = np.float16 if args.compact_fp16 else np.float32
+    base_proj = svd.fit_transform(base).astype(proj_dtype, copy=False)
     index = faiss.IndexFlatIP(args.d)
-    index.add(np.ascontiguousarray(base_proj))
+    index.add(np.ascontiguousarray(base_proj.astype(np.float32, copy=False)))
     build_time = time.perf_counter() - build_start
 
     warm_n = min(len(queries), max(1, min(args.batch_size, 8)))
     if warm_n:
-        warm_proj = svd.transform(queries[:warm_n]).astype(np.float32, copy=False)
-        index.search(np.ascontiguousarray(warm_proj), candidate_k)
+        warm_proj = svd.transform(queries[:warm_n]).astype(proj_dtype, copy=False)
+        index.search(np.ascontiguousarray(warm_proj.astype(np.float32, copy=False)), candidate_k)
 
     all_final_ids = []
     all_final_scores = []
@@ -274,8 +275,8 @@ def run_svd_rerank(args) -> None:
     search_start = time.perf_counter()
     for start in range(0, len(queries), args.batch_size):
         q_batch = queries[start : start + args.batch_size]
-        q_proj = svd.transform(q_batch).astype(np.float32, copy=False)
-        _, coarse_ids = index.search(np.ascontiguousarray(q_proj), candidate_k)
+        q_proj = svd.transform(q_batch).astype(proj_dtype, copy=False)
+        _, coarse_ids = index.search(np.ascontiguousarray(q_proj.astype(np.float32, copy=False)), candidate_k)
         all_coarse_ids.append(coarse_ids)
 
         final_ids = np.empty((len(q_batch), args.topk), dtype=np.int64)
@@ -309,6 +310,7 @@ def run_svd_rerank(args) -> None:
         "batch_size": int(args.batch_size),
         "n_iter": int(args.n_iter),
         "seed": int(args.seed),
+        "compact_fp16": bool(args.compact_fp16),
         "build_time_s": build_time,
         "search_time_s": search_time,
         "qps": len(queries) / search_time if search_time else None,
@@ -343,6 +345,7 @@ def run_svd_rerank(args) -> None:
                 "batch_size": int(args.batch_size),
                 "n_iter": int(args.n_iter),
                 "seed": int(args.seed),
+                "compact_fp16": bool(args.compact_fp16),
             },
         )
 
@@ -421,6 +424,119 @@ def run_hnsw_ip(args) -> None:
     print(json.dumps(results, indent=2))
 
 
+def run_svd_hnsw_rerank(args) -> None:
+    base = load_array(args.base_h5, args.base_dset)
+    queries = load_array(args.query_h5, args.query_dset)
+    candidate_k = args.topk * args.m
+
+    build_start = time.perf_counter()
+    svd = TruncatedSVD(n_components=args.d, algorithm="randomized", n_iter=args.n_iter, random_state=args.seed)
+    proj_dtype = np.float16 if args.compact_fp16 else np.float32
+    base_proj = svd.fit_transform(base).astype(proj_dtype, copy=False)
+    index = faiss.IndexHNSWFlat(args.d, args.m_hnsw, faiss.METRIC_INNER_PRODUCT)
+    index.hnsw.efConstruction = args.ef_construction
+    index.add(np.ascontiguousarray(base_proj.astype(np.float32, copy=False)))
+    build_time = time.perf_counter() - build_start
+
+    warm_n = min(len(queries), max(1, min(args.batch_size, 8)))
+    if warm_n:
+        warm_proj = svd.transform(queries[:warm_n]).astype(proj_dtype, copy=False)
+        index.hnsw.efSearch = max(args.ef_search, candidate_k)
+        index.search(np.ascontiguousarray(warm_proj.astype(np.float32, copy=False)), candidate_k)
+
+    all_final_ids = []
+    all_final_scores = []
+    all_coarse_ids = []
+
+    search_start = time.perf_counter()
+    index.hnsw.efSearch = max(args.ef_search, candidate_k)
+    for start in range(0, len(queries), args.batch_size):
+        q_batch = queries[start : start + args.batch_size]
+        q_proj = svd.transform(q_batch).astype(proj_dtype, copy=False)
+        _, coarse_ids = index.search(np.ascontiguousarray(q_proj.astype(np.float32, copy=False)), candidate_k)
+        all_coarse_ids.append(coarse_ids)
+
+        final_ids = np.empty((len(q_batch), args.topk), dtype=np.int64)
+        final_scores = np.empty((len(q_batch), args.topk), dtype=np.float32)
+        for i in range(len(q_batch)):
+            cand_ids = coarse_ids[i]
+            cand_vecs = base[cand_ids]
+            exact_scores = cand_vecs @ q_batch[i]
+            order = np.argsort(-exact_scores)[: args.topk]
+            final_ids[i] = cand_ids[order]
+            final_scores[i] = exact_scores[order]
+
+        all_final_ids.append(final_ids)
+        all_final_scores.append(final_scores)
+
+    search_time = time.perf_counter() - search_start
+
+    final_ids = np.vstack(all_final_ids)
+    final_scores = np.vstack(all_final_scores)
+    coarse_ids = np.vstack(all_coarse_ids)
+
+    results = {
+        "method": "svd-hnsw-rerank",
+        "n_base": int(base.shape[0]),
+        "n_queries": int(queries.shape[0]),
+        "orig_dim": int(base.shape[1]),
+        "proj_dim": int(args.d),
+        "topk": int(args.topk),
+        "m": int(args.m),
+        "candidate_k": int(candidate_k),
+        "batch_size": int(args.batch_size),
+        "n_iter": int(args.n_iter),
+        "seed": int(args.seed),
+        "compact_fp16": bool(args.compact_fp16),
+        "m_hnsw": int(args.m_hnsw),
+        "ef_construction": int(args.ef_construction),
+        "ef_search": int(args.ef_search),
+        "build_time_s": build_time,
+        "search_time_s": search_time,
+        "qps": len(queries) / search_time if search_time else None,
+        "rss_gb": rss_gb(),
+    }
+
+    if args.gt_npy:
+        gt = np.load(args.gt_npy)
+        if gt.shape[0] != final_ids.shape[0]:
+            raise ValueError(f"GT shape mismatch: gt={gt.shape}, result={final_ids.shape}")
+        results["coarse_recall_at_c"] = candidate_recall(coarse_ids, gt, args.topk)
+        results["final_recall_at_k"] = mean_recall_at_k(final_ids, gt, args.topk)
+
+    if args.output_ids_npy:
+        out = Path(args.output_ids_npy)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        np.save(out, final_ids)
+
+    if args.output_h5:
+        write_result_h5(
+            args.output_h5,
+            final_ids,
+            final_scores,
+            algo=args.algo_name or "svd-hnsw-rerank",
+            task=args.task_name,
+            build_time_s=build_time,
+            search_time_s=search_time,
+            params={
+                "proj_dim": int(args.d),
+                "m": int(args.m),
+                "topk": int(args.topk),
+                "batch_size": int(args.batch_size),
+                "n_iter": int(args.n_iter),
+                "seed": int(args.seed),
+                "compact_fp16": bool(args.compact_fp16),
+                "m_hnsw": int(args.m_hnsw),
+                "ef_construction": int(args.ef_construction),
+                "ef_search": int(args.ef_search),
+            },
+        )
+
+    if args.output:
+        write_json(args.output, results)
+    print(json.dumps(results, indent=2))
+
+
 def run_sweep(args) -> None:
     with open(args.config_json, "r", encoding="utf-8") as handle:
         config = json.load(handle)
@@ -449,6 +565,7 @@ def run_sweep(args) -> None:
             n_iter=run_cfg.get("n_iter", 7),
             seed=run_cfg.get("seed", 42),
             whiten=run_cfg.get("whiten", False),
+            compact_fp16=run_cfg.get("compact_fp16", False),
             m_hnsw=run_cfg.get("m_hnsw", 32),
             ef_construction=run_cfg.get("ef_construction", 200),
             ef_search=run_cfg.get("ef_search", 64),
@@ -460,6 +577,8 @@ def run_sweep(args) -> None:
             result = capture_run(run_pca_rerank, run_args)
         elif args.method == "hnsw-ip":
             result = capture_run(run_hnsw_ip, run_args)
+        elif args.method == "svd-hnsw-rerank":
+            result = capture_run(run_svd_hnsw_rerank, run_args)
         else:
             raise ValueError(f"Metodo sweep non supportato: {args.method}")
 
@@ -514,6 +633,7 @@ def run_repeat(args) -> None:
         n_iter=args.n_iter,
         seed=args.seed,
         whiten=args.whiten,
+        compact_fp16=args.compact_fp16,
         m_hnsw=args.m_hnsw,
         ef_construction=args.ef_construction,
         ef_search=args.ef_search,
@@ -529,6 +649,8 @@ def run_repeat(args) -> None:
             result = capture_run(run_pca_rerank, run_args)
         elif args.method == "hnsw-ip":
             result = capture_run(run_hnsw_ip, run_args)
+        elif args.method == "svd-hnsw-rerank":
+            result = capture_run(run_svd_hnsw_rerank, run_args)
         elif args.method == "exact":
             result = capture_run(run_exact, run_args)
         else:
@@ -601,6 +723,7 @@ def build_parser():
     svd_cmd.add_argument("--batch-size", type=int, default=512)
     svd_cmd.add_argument("--n-iter", type=int, default=7)
     svd_cmd.add_argument("--seed", type=int, default=42)
+    svd_cmd.add_argument("--compact-fp16", action="store_true")
     svd_cmd.add_argument("--gt-npy")
     svd_cmd.add_argument("--output")
     svd_cmd.add_argument("--output-ids-npy")
@@ -625,8 +748,30 @@ def build_parser():
     hnsw_cmd.add_argument("--algo-name")
     hnsw_cmd.add_argument("--task-name", default="task2")
 
+    svd_hnsw_cmd = sub.add_parser("svd-hnsw-rerank", help="TruncatedSVD + HNSW sui compressi + reranking esatto.")
+    svd_hnsw_cmd.add_argument("--base-h5", required=True)
+    svd_hnsw_cmd.add_argument("--query-h5", required=True)
+    svd_hnsw_cmd.add_argument("--base-dset", required=True)
+    svd_hnsw_cmd.add_argument("--query-dset", required=True)
+    svd_hnsw_cmd.add_argument("--d", type=int, required=True)
+    svd_hnsw_cmd.add_argument("--m", type=int, required=True)
+    svd_hnsw_cmd.add_argument("--topk", type=int, default=30)
+    svd_hnsw_cmd.add_argument("--batch-size", type=int, default=512)
+    svd_hnsw_cmd.add_argument("--n-iter", type=int, default=7)
+    svd_hnsw_cmd.add_argument("--seed", type=int, default=42)
+    svd_hnsw_cmd.add_argument("--compact-fp16", action="store_true")
+    svd_hnsw_cmd.add_argument("--m-hnsw", type=int, default=32)
+    svd_hnsw_cmd.add_argument("--ef-construction", type=int, default=200)
+    svd_hnsw_cmd.add_argument("--ef-search", type=int, default=256)
+    svd_hnsw_cmd.add_argument("--gt-npy")
+    svd_hnsw_cmd.add_argument("--output")
+    svd_hnsw_cmd.add_argument("--output-ids-npy")
+    svd_hnsw_cmd.add_argument("--output-h5")
+    svd_hnsw_cmd.add_argument("--algo-name")
+    svd_hnsw_cmd.add_argument("--task-name", default="task2")
+
     sweep_cmd = sub.add_parser("sweep", help="Esegue una lista di configurazioni da un file JSON.")
-    sweep_cmd.add_argument("--method", required=True, choices=["svd-rerank", "pca-rerank", "hnsw-ip"])
+    sweep_cmd.add_argument("--method", required=True, choices=["svd-rerank", "pca-rerank", "hnsw-ip", "svd-hnsw-rerank"])
     sweep_cmd.add_argument("--config-json", required=True)
     sweep_cmd.add_argument("--section", required=True)
     sweep_cmd.add_argument("--base-h5", required=True)
@@ -639,7 +784,7 @@ def build_parser():
     sweep_cmd.add_argument("--output")
 
     repeat_cmd = sub.add_parser("repeat", help="Ripete piu volte una singola configurazione e aggrega le metriche.")
-    repeat_cmd.add_argument("--method", required=True, choices=["exact", "svd-rerank", "pca-rerank", "hnsw-ip"])
+    repeat_cmd.add_argument("--method", required=True, choices=["exact", "svd-rerank", "pca-rerank", "hnsw-ip", "svd-hnsw-rerank"])
     repeat_cmd.add_argument("--repeats", type=int, default=3)
     repeat_cmd.add_argument("--base-h5", required=True)
     repeat_cmd.add_argument("--query-h5", required=True)
@@ -656,6 +801,7 @@ def build_parser():
     repeat_cmd.add_argument("--n-iter", type=int, default=7)
     repeat_cmd.add_argument("--seed", type=int, default=42)
     repeat_cmd.add_argument("--whiten", action="store_true")
+    repeat_cmd.add_argument("--compact-fp16", action="store_true")
     repeat_cmd.add_argument("--m-hnsw", type=int, default=32)
     repeat_cmd.add_argument("--ef-construction", type=int, default=200)
     repeat_cmd.add_argument("--ef-search", type=int, default=64)
@@ -677,6 +823,8 @@ def main():
         run_svd_rerank(args)
     elif args.cmd == "hnsw-ip":
         run_hnsw_ip(args)
+    elif args.cmd == "svd-hnsw-rerank":
+        run_svd_hnsw_rerank(args)
     elif args.cmd == "sweep":
         run_sweep(args)
     elif args.cmd == "repeat":

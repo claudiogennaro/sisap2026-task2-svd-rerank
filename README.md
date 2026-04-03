@@ -11,7 +11,7 @@ La configurazione piu robusta trovata finora e:
 - `d=76`
 - `m=10`
 - `topk=30`
-- `batch_size=512`
+- `batch_size=1024`
 
 ## Repository contents
 
@@ -122,6 +122,31 @@ python src/task2_bench.py svd-rerank \
   --output runs/svd_d76_m10.json
 ```
 
+Per testare la memorizzazione dei vettori compressi in `float16`, aggiungi:
+
+```bash
+  --compact-fp16
+```
+
+SVD + HNSW rerank:
+
+```bash
+python src/task2_bench.py svd-hnsw-rerank \
+  --base-h5 data/llama-128-ip.hdf5 \
+  --query-h5 data/llama-128-ip.hdf5 \
+  --base-dset train \
+  --query-dset test \
+  --d 76 \
+  --m 10 \
+  --m-hnsw 32 \
+  --ef-construction 200 \
+  --ef-search 256 \
+  --topk 30 \
+  --batch-size 512 \
+  --gt-npy runs/exact_ids.npy \
+  --output runs/svd_hnsw_d76_m10.json
+```
+
 Repeat:
 
 ```bash
@@ -138,6 +163,12 @@ python src/task2_bench.py repeat \
   --batch-size 512 \
   --gt-npy runs/exact_ids.npy \
   --output runs/svd_d76_m10_repeat.json
+```
+
+Esperimenti mirati su `batch_size` e `compact-fp16`:
+
+```bash
+python scripts/run_targeted_svd_experiments.py
 ```
 
 ## Notes
