@@ -1,13 +1,13 @@
 # SISAP 2026 Task 2 Submission Scaffold
 
-Repository per il `Task 2` della SISAP 2026 Indexing Challenge.
+Repository for `Task 2` of the SISAP 2026 Indexing Challenge.
 
-La soluzione corrente usa:
-- `TruncatedSVD` per riduzione lineare
-- ricerca `FlatIP` nello spazio compresso
-- reranking esatto sui candidati nello spazio originale
+The current solution uses:
+- `TruncatedSVD` for linear dimensionality reduction
+- `FlatIP` search in the compressed space
+- exact reranking on the original vectors
 
-La configurazione piu robusta trovata finora e:
+The most robust configuration found so far is:
 - `d=76`
 - `m=10`
 - `topk=30`
@@ -15,26 +15,27 @@ La configurazione piu robusta trovata finora e:
 
 ## Task 2 hyperparameter sets
 
-Le configurazioni candidate attuali per la submission sono raccolte in:
+The current candidate submission configurations are collected in:
 - `experiments/task2_submission.json`
 
-Set candidati correnti:
+Current candidate sets:
 - `svd-rerank-primary`: `d=76`, `m=10`, `topk=30`, `batch_size=1024`, `n_iter=7`
 - `svd-rerank-alt-80x8`: `d=80`, `m=8`, `topk=30`, `batch_size=1024`, `n_iter=7`
 - `svd-rerank-alt-76x10-bs512`: `d=76`, `m=10`, `topk=30`, `batch_size=512`, `n_iter=7`
 
-Il numero di set e volutamente piccolo al momento, ma il formato e gia pronto per arrivare fino a 15 configurazioni.
+The number of sets is intentionally small at the moment, but the format is already ready to scale up to 15 configurations.
 
 ## Repository contents
 
-- `src/task2_bench.py`: benchmark runner per exact, HNSW, PCA/SVD rerank
-- `src/run_task2.py`: runner finale per il `Task 2`
-- `experiments/task2_initial.json`: set iniziali di esperimenti
-- `Dockerfile`: immagine container per esecuzione riproducibile
+- `src/task2_bench.py`: benchmark runner for exact, HNSW, PCA/SVD rerank methods
+- `src/run_task2.py`: final runner for `Task 2`
+- `experiments/task2_initial.json`: exploratory experiment sets
+- `experiments/task2_submission.json`: current candidate submission sets
+- `Dockerfile`: reproducible container image
 
 ## Environment
 
-Installazione locale:
+Local installation:
 
 ```bash
 python3 -m venv .venv
@@ -45,14 +46,14 @@ pip install -r requirements.txt
 
 ## Input layout
 
-Il container segue il layout atteso dalla challenge:
+The container follows the layout expected by the challenge:
 - input dataset in `/app/data`
 - output in `/app/results`
 
-Per il file di sviluppo usato finora:
-- file HDF5: `llama-128-ip.hdf5`
-- dataset base: `train`
-- dataset query: `test`
+For the development file used so far:
+- HDF5 file: `llama-128-ip.hdf5`
+- base dataset: `train`
+- query dataset: `test`
 
 ## Run locally
 
@@ -85,11 +86,11 @@ docker run --rm \
 
 ## Output format
 
-L'output HDF5 scritto dal runner contiene:
-- `knns`: shape `(n_queries, 30)`, ID `1-based`
+The HDF5 output written by the runner contains:
+- `knns`: shape `(n_queries, 30)`, `1-based` identifiers
 - `dists`: shape `(n_queries, 30)`
 
-Attributi root:
+Root attributes:
 - `algo`
 - `task`
 - `buildtime`
@@ -98,13 +99,13 @@ Attributi root:
 
 ## Benchmark utilities
 
-Ispezione HDF5:
+Inspect an HDF5 file:
 
 ```bash
 python src/task2_bench.py inspect --h5 data/llama-128-ip.hdf5
 ```
 
-Baseline esatta:
+Exact baseline:
 
 ```bash
 python src/task2_bench.py exact \
@@ -134,7 +135,7 @@ python src/task2_bench.py svd-rerank \
   --output runs/svd_d76_m10.json
 ```
 
-Per testare la memorizzazione dei vettori compressi in `float16`, aggiungi:
+To test compressed-vector storage in `float16`, add:
 
 ```bash
   --compact-fp16
@@ -177,7 +178,7 @@ python src/task2_bench.py repeat \
   --output runs/svd_d76_m10_repeat.json
 ```
 
-Esperimenti mirati su `batch_size` e `compact-fp16`:
+Targeted experiments on `batch_size` and `compact-fp16`:
 
 ```bash
 python scripts/run_targeted_svd_experiments.py
@@ -185,6 +186,6 @@ python scripts/run_targeted_svd_experiments.py
 
 ## Notes
 
-- Il `Dockerfile` fissa le principali variabili di threading a `8`.
-- Il benchmark e il runner finale condividono lo stesso codice di esecuzione.
-- Il repository non include dataset, risultati o ambienti locali.
+- The `Dockerfile` fixes the main threading-related environment variables to `8`.
+- The benchmark runner and the final runner share the same execution code path.
+- The repository does not include datasets, results, or local environments.
