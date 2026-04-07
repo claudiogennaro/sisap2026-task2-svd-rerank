@@ -13,6 +13,18 @@ La configurazione piu robusta trovata finora e:
 - `topk=30`
 - `batch_size=1024`
 
+## Task 2 hyperparameter sets
+
+Le configurazioni candidate attuali per la submission sono raccolte in:
+- `experiments/task2_submission.json`
+
+Set candidati correnti:
+- `svd-rerank-primary`: `d=76`, `m=10`, `topk=30`, `batch_size=1024`, `n_iter=7`
+- `svd-rerank-alt-80x8`: `d=80`, `m=8`, `topk=30`, `batch_size=1024`, `n_iter=7`
+- `svd-rerank-alt-76x10-bs512`: `d=76`, `m=10`, `topk=30`, `batch_size=512`, `n_iter=7`
+
+Il numero di set e volutamente piccolo al momento, ma il formato e gia pronto per arrivare fino a 15 configurazioni.
+
 ## Repository contents
 
 - `src/task2_bench.py`: benchmark runner per exact, HNSW, PCA/SVD rerank
@@ -117,7 +129,7 @@ python src/task2_bench.py svd-rerank \
   --d 76 \
   --m 10 \
   --topk 30 \
-  --batch-size 512 \
+  --batch-size 1024 \
   --gt-npy runs/exact_ids.npy \
   --output runs/svd_d76_m10.json
 ```
@@ -142,7 +154,7 @@ python src/task2_bench.py svd-hnsw-rerank \
   --ef-construction 200 \
   --ef-search 256 \
   --topk 30 \
-  --batch-size 512 \
+  --batch-size 1024 \
   --gt-npy runs/exact_ids.npy \
   --output runs/svd_hnsw_d76_m10.json
 ```
@@ -160,7 +172,7 @@ python src/task2_bench.py repeat \
   --d 76 \
   --m 10 \
   --topk 30 \
-  --batch-size 512 \
+  --batch-size 1024 \
   --gt-npy runs/exact_ids.npy \
   --output runs/svd_d76_m10_repeat.json
 ```
