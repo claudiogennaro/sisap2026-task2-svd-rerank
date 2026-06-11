@@ -84,6 +84,28 @@ docker run --rm \
   --output-h5 /app/results/task2/svd_d76_m10.h5
 ```
 
+## TIRA submission
+
+The challenge evaluation pipeline is now handled through TIRA.
+
+Typical local dry run command:
+
+```bash
+tira-cli code-submission \
+  --path . \
+  --command 'python src/run_task2.py --input "$inputDataset/*.h5" --task-description "$inputDataset/config.json" --output "$outputDir"' \
+  --task sisap-2026 \
+  --dataset task-2-spot-check-20260528-training \
+  --dry-run
+```
+
+The same runner supports both:
+- local usage via `--input-h5 ... --output-h5 ...`
+- TIRA usage via `--input ... --task-description ... --output ...`
+
+When used through TIRA, the runner writes its result file to:
+- `$outputDir/task2/svd-rerank_d76_m10.h5`
+
 ## Output format
 
 The HDF5 output written by the runner contains:
