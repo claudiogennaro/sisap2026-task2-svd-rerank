@@ -86,15 +86,15 @@ def collect_vector_candidates(h5_paths):
     candidates = []
     for h5_path in h5_paths:
         with h5py.File(h5_path, "r") as handle:
-            for name, obj in handle.items():
+            def visit(name, obj):
                 if not isinstance(obj, h5py.Dataset):
-                    continue
+                    return
                 if len(obj.shape) != 2:
-                    continue
+                    return
                 if obj.dtype.kind != "f":
-                    continue
+                    return
                 if is_excluded_dataset(name):
-                    continue
+                    return
                 candidates.append(
                     {
                         "path": h5_path,
@@ -103,6 +103,7 @@ def collect_vector_candidates(h5_paths):
                         "dim": int(obj.shape[1]),
                     }
                 )
+            handle.visititems(visit)
     if not candidates:
         raise SystemExit(f"No floating-point 2D vector datasets found in: {h5_paths}")
     return candidates
@@ -125,10 +126,26 @@ def pick_named_candidate(candidates, preferred_names):
     return None
 
 
-def infer_inputs(h5_paths, train_dset: str, query_dset: str):
+def find_candidate(candidates, dataset_name):
+    for candidate in candidates:
+        if candidate["name"] == dataset_name:
+            return candidate
+    return None
+
+
+def infer_inputs(h5_paths, train_dset: str, query_dset: str, task_description=None):
     candidates = collect_vector_candidates(h5_paths)
     common_dim = choose_common_dim(candidates)
     candidates = [candidate for candidate in candidates if candidate["dim"] == common_dim]
+
+    if task_description:
+        configured_base = task_description.get("data")
+        configured_query = task_description.get("queries")
+        if isinstance(configured_base, str) and isinstance(configured_query, str):
+            base_candidate = find_candidate(candidates, configured_base)
+            query_candidate = find_candidate(candidates, configured_query)
+            if base_candidate and query_candidate:
+                return base_candidate, query_candidate
 
     by_file = {}
     for candidate in candidates:
@@ -158,6 +175,8 @@ def infer_inputs(h5_paths, train_dset: str, query_dset: str):
     sorted_candidates = sorted(candidates, key=lambda candidate: (candidate["rows"], candidate["name"], candidate["path"]))
     query_candidate = sorted_candidates[0]
     base_candidate = sorted(candidates, key=lambda candidate: (candidate["rows"], candidate["name"], candidate["path"]))[-1]
+    if len(candidates) == 1:
+        return base_candidate, base_candidate
     if base_candidate["path"] == query_candidate["path"] and base_candidate["name"] == query_candidate["name"]:
         raise SystemExit(
             "Unable to infer distinct base/query datasets from the provided HDF5 inputs. "
@@ -168,7 +187,7 @@ def infer_inputs(h5_paths, train_dset: str, query_dset: str):
 
 def infer_result_dataset_name(task_description, base_candidate, query_candidate):
     if task_description:
-        for key in ("dataset", "dataset_id", "input", "inputDataset"):
+        for key in ("dataset_name", "dataset", "dataset_id", "input", "inputDataset"):
             value = task_description.get(key)
             if isinstance(value, str) and value:
                 return Path(value).stem
@@ -198,7 +217,7 @@ def main():
         args.task_name = task_description.get("task", args.task_name)
 
     input_h5s = resolve_input_h5s(args)
-    base_candidate, query_candidate = infer_inputs(input_h5s, args.train_dset, args.query_dset)
+    base_candidate, query_candidate = infer_inputs(input_h5s, args.train_dset, args.query_dset, task_description)
     print(f"Using base file: {base_candidate['path']}")
     print(f"Using base dataset: {base_candidate['name']}")
     print(f"Using query file: {query_candidate['path']}")
