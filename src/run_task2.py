@@ -4,9 +4,22 @@ import json
 from pathlib import Path
 
 import h5py
-import numpy as np
 
 from task2_bench import run_svd_rerank
+
+PREFERRED_BASE_NAMES = ["train", "learn", "base", "database", "vectors", "xb"]
+PREFERRED_QUERY_NAMES = ["test", "queries", "query", "xq", "dev", "eval"]
+EXCLUDED_DATASET_TOKENS = {
+    "neighbor",
+    "distance",
+    "dist",
+    "knn",
+    "groundtruth",
+    "ground_truth",
+    "label",
+    "id",
+    "idx",
+}
 
 
 def build_parser():
@@ -35,24 +48,15 @@ def build_parser():
     return parser
 
 
-def resolve_input_h5(args) -> str:
+def resolve_input_h5s(args):
     if args.input_h5:
-        return args.input_h5
+        return [args.input_h5]
     if args.input:
         matches = sorted(glob.glob(args.input))
         if matches:
-            # TIRA spot-check datasets may contain multiple .h5 files.
-            # Prefer the one that exposes the expected train/test datasets.
-            for candidate in matches:
-                try:
-                    with h5py.File(candidate, "r") as handle:
-                        if args.train_dset in handle and args.query_dset in handle:
-                            return candidate
-                except Exception:
-                    continue
-            return matches[0]
+            return matches
         if Path(args.input).exists():
-            return args.input
+            return [args.input]
     raise SystemExit("No input dataset found. Provide --input-h5 or --input.")
 
 
@@ -73,46 +77,104 @@ def resolve_output_h5(args) -> str:
     return str(default_out)
 
 
-def infer_datasets(h5_path: str, train_dset: str, query_dset: str):
-    with h5py.File(h5_path, "r") as handle:
-        candidates = []
-        for name, obj in handle.items():
-            if not isinstance(obj, h5py.Dataset):
-                continue
-            if len(obj.shape) != 2:
-                continue
-            if obj.dtype.kind not in ("f", "i", "u"):
-                continue
-            candidates.append((name, obj.shape, obj.dtype.kind))
+def is_excluded_dataset(name: str) -> bool:
+    lowered = name.lower()
+    return any(token in lowered for token in EXCLUDED_DATASET_TOKENS)
 
-        if not candidates:
-            raise SystemExit(f"No numeric 2D datasets found in {h5_path}")
 
-        names = {name for name, _, _ in candidates}
+def collect_vector_candidates(h5_paths):
+    candidates = []
+    for h5_path in h5_paths:
+        with h5py.File(h5_path, "r") as handle:
+            for name, obj in handle.items():
+                if not isinstance(obj, h5py.Dataset):
+                    continue
+                if len(obj.shape) != 2:
+                    continue
+                if obj.dtype.kind != "f":
+                    continue
+                if is_excluded_dataset(name):
+                    continue
+                candidates.append(
+                    {
+                        "path": h5_path,
+                        "name": name,
+                        "rows": int(obj.shape[0]),
+                        "dim": int(obj.shape[1]),
+                    }
+                )
+    if not candidates:
+        raise SystemExit(f"No floating-point 2D vector datasets found in: {h5_paths}")
+    return candidates
 
-        def valid_preferred(name):
-            return name in names
 
-        if valid_preferred(train_dset) and valid_preferred(query_dset):
-            return train_dset, query_dset
+def choose_common_dim(candidates):
+    dim_stats = {}
+    for candidate in candidates:
+        stats = dim_stats.setdefault(candidate["dim"], {"count": 0, "rows": 0})
+        stats["count"] += 1
+        stats["rows"] += candidate["rows"]
+    return max(dim_stats.items(), key=lambda item: (item[1]["count"], item[1]["rows"], item[0]))[0]
 
-        # Prefer canonical task-2 names when available.
-        preferred_base = ["train", "learn", "base", "database", "vectors"]
-        preferred_query = ["test", "queries", "query", "xq"]
 
-        base_name = next((n for n in preferred_base if n in names), None)
-        query_name = next((n for n in preferred_query if n in names and n != base_name), None)
+def pick_named_candidate(candidates, preferred_names):
+    by_name = {candidate["name"]: candidate for candidate in candidates}
+    for name in preferred_names:
+        if name in by_name:
+            return by_name[name]
+    return None
 
-        if base_name and query_name:
-            return base_name, query_name
 
-        # Fallback: choose the largest 2D numeric dataset as base and the smallest as query.
-        sorted_candidates = sorted(candidates, key=lambda x: (x[1][0], x[1][1]))
-        query_name = sorted_candidates[0][0]
-        base_name = sorted_candidates[-1][0]
-        if base_name == query_name and len(sorted_candidates) > 1:
-            query_name = sorted_candidates[-2][0]
-        return base_name, query_name
+def infer_inputs(h5_paths, train_dset: str, query_dset: str):
+    candidates = collect_vector_candidates(h5_paths)
+    common_dim = choose_common_dim(candidates)
+    candidates = [candidate for candidate in candidates if candidate["dim"] == common_dim]
+
+    by_file = {}
+    for candidate in candidates:
+        by_file.setdefault(candidate["path"], []).append(candidate)
+
+    for file_candidates in by_file.values():
+        names = {candidate["name"] for candidate in file_candidates}
+        if train_dset in names and query_dset in names:
+            return (
+                next(candidate for candidate in file_candidates if candidate["name"] == train_dset),
+                next(candidate for candidate in file_candidates if candidate["name"] == query_dset),
+            )
+
+    for file_candidates in by_file.values():
+        base_candidate = pick_named_candidate(file_candidates, PREFERRED_BASE_NAMES)
+        query_candidate = pick_named_candidate(file_candidates, PREFERRED_QUERY_NAMES)
+        if base_candidate and query_candidate and base_candidate["name"] != query_candidate["name"]:
+            return base_candidate, query_candidate
+
+    base_candidate = pick_named_candidate(candidates, PREFERRED_BASE_NAMES)
+    query_candidate = pick_named_candidate(candidates, PREFERRED_QUERY_NAMES)
+    if base_candidate and query_candidate and (
+        base_candidate["path"] != query_candidate["path"] or base_candidate["name"] != query_candidate["name"]
+    ):
+        return base_candidate, query_candidate
+
+    sorted_candidates = sorted(candidates, key=lambda candidate: (candidate["rows"], candidate["name"], candidate["path"]))
+    query_candidate = sorted_candidates[0]
+    base_candidate = sorted(candidates, key=lambda candidate: (candidate["rows"], candidate["name"], candidate["path"]))[-1]
+    if base_candidate["path"] == query_candidate["path"] and base_candidate["name"] == query_candidate["name"]:
+        raise SystemExit(
+            "Unable to infer distinct base/query datasets from the provided HDF5 inputs. "
+            f"Candidates: {[(c['path'], c['name'], c['rows'], c['dim']) for c in candidates]}"
+        )
+    return base_candidate, query_candidate
+
+
+def infer_result_dataset_name(task_description, base_candidate, query_candidate):
+    if task_description:
+        for key in ("dataset", "dataset_id", "input", "inputDataset"):
+            value = task_description.get(key)
+            if isinstance(value, str) and value:
+                return Path(value).stem
+    if query_candidate:
+        return Path(query_candidate["path"]).stem
+    return Path(base_candidate["path"]).stem
 
 
 def maybe_load_task_description(args):
@@ -135,18 +197,20 @@ def main():
     if task_description:
         args.task_name = task_description.get("task", args.task_name)
 
-    input_h5 = resolve_input_h5(args)
-    base_dset, query_dset = infer_datasets(input_h5, args.train_dset, args.query_dset)
-    print(f"Using input file: {input_h5}")
-    print(f"Using base dataset: {base_dset}")
-    print(f"Using query dataset: {query_dset}")
+    input_h5s = resolve_input_h5s(args)
+    base_candidate, query_candidate = infer_inputs(input_h5s, args.train_dset, args.query_dset)
+    print(f"Using base file: {base_candidate['path']}")
+    print(f"Using base dataset: {base_candidate['name']}")
+    print(f"Using query file: {query_candidate['path']}")
+    print(f"Using query dataset: {query_candidate['name']}")
     output_h5 = resolve_output_h5(args)
+    dataset_name = infer_result_dataset_name(task_description, base_candidate, query_candidate)
 
     bench_args = argparse.Namespace(
-        base_h5=input_h5,
-        query_h5=input_h5,
-        base_dset=base_dset,
-        query_dset=query_dset,
+        base_h5=base_candidate["path"],
+        query_h5=query_candidate["path"],
+        base_dset=base_candidate["name"],
+        query_dset=query_candidate["name"],
         d=args.d,
         m=args.m,
         topk=args.topk,
@@ -160,6 +224,7 @@ def main():
         output_h5=output_h5,
         algo_name=args.algo_name,
         task_name=args.task_name,
+        dataset_name=dataset_name,
     )
     run_svd_rerank(bench_args)
 

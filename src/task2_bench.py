@@ -78,6 +78,7 @@ def write_result_h5(
     scores: np.ndarray,
     algo: str,
     task: str,
+    dataset: Optional[str],
     build_time_s: float,
     search_time_s: float,
     params: dict,
@@ -90,6 +91,8 @@ def write_result_h5(
         handle.create_dataset("dists", data=np.asarray(scores, dtype=np.float32))
         handle.attrs["algo"] = algo
         handle.attrs["task"] = task
+        if dataset:
+            handle.attrs["dataset"] = dataset
         handle.attrs["buildtime"] = float(build_time_s)
         handle.attrs["querytime"] = float(search_time_s)
         handle.attrs["params"] = json.dumps(params, sort_keys=True)
@@ -138,6 +141,7 @@ def run_exact(args) -> None:
             scores,
             algo=args.algo_name or "exact-flatip",
             task=args.task_name,
+            dataset=getattr(args, "dataset_name", None),
             build_time_s=build_time,
             search_time_s=search_time,
             params={"topk": int(args.topk), "batch_size": int(args.batch_size)},
@@ -233,6 +237,7 @@ def run_pca_rerank(args) -> None:
             final_scores,
             algo=args.algo_name or "pca-rerank",
             task=args.task_name,
+            dataset=getattr(args, "dataset_name", None),
             build_time_s=build_time,
             search_time_s=search_time,
             params={
@@ -336,6 +341,7 @@ def run_svd_rerank(args) -> None:
             final_scores,
             algo=args.algo_name or "svd-rerank",
             task=args.task_name,
+            dataset=getattr(args, "dataset_name", None),
             build_time_s=build_time,
             search_time_s=search_time,
             params={
@@ -408,6 +414,7 @@ def run_hnsw_ip(args) -> None:
             scores,
             algo=args.algo_name or "hnsw-ip",
             task=args.task_name,
+            dataset=getattr(args, "dataset_name", None),
             build_time_s=build_time,
             search_time_s=search_time,
             params={
@@ -516,6 +523,7 @@ def run_svd_hnsw_rerank(args) -> None:
             final_scores,
             algo=args.algo_name or "svd-hnsw-rerank",
             task=args.task_name,
+            dataset=getattr(args, "dataset_name", None),
             build_time_s=build_time,
             search_time_s=search_time,
             params={
