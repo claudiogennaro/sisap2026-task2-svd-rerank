@@ -52,11 +52,23 @@ def resolve_input_h5s(args):
     if args.input_h5:
         return [args.input_h5]
     if args.input:
+        input_path = Path(args.input)
+        if input_path.is_dir():
+            matches = sorted(str(path) for path in input_path.rglob("*.h5"))
+            if matches:
+                return matches
         matches = sorted(glob.glob(args.input))
         if matches:
             return matches
-        if Path(args.input).exists():
-            return [args.input]
+        matches = sorted(glob.glob(args.input, recursive=True))
+        if matches:
+            return matches
+        if input_path.exists():
+            if input_path.is_file():
+                return [args.input]
+            matches = sorted(str(path) for path in input_path.rglob("*.h5"))
+            if matches:
+                return matches
     raise SystemExit("No input dataset found. Provide --input-h5 or --input.")
 
 
