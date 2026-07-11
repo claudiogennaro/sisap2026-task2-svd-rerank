@@ -57,10 +57,22 @@ def resolve_input_h5s(args):
             matches = sorted(str(path) for path in input_path.rglob("*.h5"))
             if matches:
                 return matches
-        matches = sorted(glob.glob(args.input))
+        matches = []
+        for match in sorted(glob.glob(args.input)):
+            match_path = Path(match)
+            if match_path.is_file() and match_path.suffix == ".h5":
+                matches.append(match)
+            elif match_path.is_dir():
+                matches.extend(sorted(str(path) for path in match_path.rglob("*.h5")))
         if matches:
             return matches
-        matches = sorted(glob.glob(args.input, recursive=True))
+        matches = []
+        for match in sorted(glob.glob(args.input, recursive=True)):
+            match_path = Path(match)
+            if match_path.is_file() and match_path.suffix == ".h5":
+                matches.append(match)
+            elif match_path.is_dir():
+                matches.extend(sorted(str(path) for path in match_path.rglob("*.h5")))
         if matches:
             return matches
         if input_path.exists():
