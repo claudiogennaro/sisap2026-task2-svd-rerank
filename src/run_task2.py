@@ -1,6 +1,9 @@
 import argparse
 import glob
 import json
+import os
+import tempfile
+import urllib.request
 from pathlib import Path
 from typing import Optional
 
@@ -57,6 +60,40 @@ def collect_h5_files(root_path: Path):
     return []
 
 
+def try_resolve_from_task_description(task_description, task_description_path: Optional[Path]):
+    if not task_description or not task_description_path:
+        return []
+
+    filename = task_description.get("filename")
+    if not isinstance(filename, str) or not filename:
+        return []
+
+    candidate_paths = [
+        task_description_path.parent / filename,
+        Path("/tira-data/input") / filename,
+    ]
+    for path in candidate_paths:
+        if path.exists():
+            return [str(path)]
+
+    mirrored_path = task_description_path.parent / ".mirrored-resources.json"
+    if mirrored_path.exists():
+        try:
+            mirrored = json.loads(mirrored_path.read_text())
+        except Exception:
+            mirrored = {}
+        resource = mirrored.get(filename)
+        if isinstance(resource, dict):
+            url = resource.get("url")
+            if isinstance(url, str) and url:
+                local_path = Path(tempfile.gettempdir()) / filename
+                if not local_path.exists():
+                    urllib.request.urlretrieve(url, local_path)
+                return [str(local_path)]
+
+    return []
+
+
 def resolve_input_h5s(args, task_description_path: Optional[Path] = None):
     if args.input_h5:
         return [args.input_h5]
@@ -106,6 +143,16 @@ def resolve_input_h5s(args, task_description_path: Optional[Path] = None):
         matches = collect_h5_files(env_input)
         if matches:
             return matches
+
+    task_description = None
+    if task_description_path and task_description_path.exists():
+        try:
+            task_description = json.loads(task_description_path.read_text())
+        except Exception:
+            task_description = None
+    matches = try_resolve_from_task_description(task_description, task_description_path)
+    if matches:
+        return matches
     raise SystemExit("No input dataset found. Provide --input-h5 or --input.")
 
 
