@@ -2,6 +2,7 @@ import argparse
 import glob
 import json
 from pathlib import Path
+from typing import Optional
 
 import h5py
 
@@ -48,17 +49,37 @@ def build_parser():
     return parser
 
 
-def resolve_input_h5s(args):
+def collect_h5_files(root_path: Path):
+    if root_path.is_file() and root_path.suffix == ".h5":
+        return [str(root_path)]
+    if root_path.is_dir():
+        return sorted(str(path) for path in root_path.rglob("*.h5"))
+    return []
+
+
+def resolve_input_h5s(args, task_description_path: Optional[Path] = None):
     if args.input_h5:
         return [args.input_h5]
+
+    candidate_roots = []
     if args.input:
-        input_path = Path(args.input)
+        candidate_roots.append(Path(args.input))
+    if task_description_path and task_description_path.exists():
+        candidate_roots.append(task_description_path.parent)
+
+    seen = set()
+    for input_path in candidate_roots:
+        key = str(input_path)
+        if key in seen:
+            continue
+        seen.add(key)
+
         if input_path.is_dir():
             matches = sorted(str(path) for path in input_path.rglob("*.h5"))
             if matches:
                 return matches
         matches = []
-        for match in sorted(glob.glob(args.input)):
+        for match in sorted(glob.glob(str(input_path))):
             match_path = Path(match)
             if match_path.is_file() and match_path.suffix == ".h5":
                 matches.append(match)
@@ -67,7 +88,7 @@ def resolve_input_h5s(args):
         if matches:
             return matches
         matches = []
-        for match in sorted(glob.glob(args.input, recursive=True)):
+        for match in sorted(glob.glob(str(input_path), recursive=True)):
             match_path = Path(match)
             if match_path.is_file() and match_path.suffix == ".h5":
                 matches.append(match)
@@ -76,11 +97,15 @@ def resolve_input_h5s(args):
         if matches:
             return matches
         if input_path.exists():
-            if input_path.is_file():
-                return [args.input]
-            matches = sorted(str(path) for path in input_path.rglob("*.h5"))
+            matches = collect_h5_files(input_path)
             if matches:
                 return matches
+
+    env_input = Path("/tira-data/input")
+    if env_input.exists():
+        matches = collect_h5_files(env_input)
+        if matches:
+            return matches
     raise SystemExit("No input dataset found. Provide --input-h5 or --input.")
 
 
@@ -236,11 +261,14 @@ def main():
     parser = build_parser()
     args = parser.parse_args()
 
+    task_description_path = Path(args.task_description) if args.task_description else None
     task_description = maybe_load_task_description(args)
     if task_description:
         args.task_name = task_description.get("task", args.task_name)
 
-    input_h5s = resolve_input_h5s(args)
+    print(f"Input argument: {args.input}")
+    print(f"Task description: {args.task_description}")
+    input_h5s = resolve_input_h5s(args, task_description_path)
     base_candidate, query_candidate = infer_inputs(input_h5s, args.train_dset, args.query_dset, task_description)
     print(f"Using base file: {base_candidate['path']}")
     print(f"Using base dataset: {base_candidate['name']}")
